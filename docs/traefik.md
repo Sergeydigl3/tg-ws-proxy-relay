@@ -1,10 +1,13 @@
 # Настройка Traefik с использованием Unix Socket (Docker)
 
-В данном руководстве показано, как запустить `worker` и `traefik` в Docker, настроив связь между ними через Unix-сокет, а также настроить SSL/TLS сертификаты.
+В данном руководстве показано, как запустить `worker` и `traefik` в Docker через Unix-сокет. Во всех примерах Traefik будет следить за директорией `traefik-dynamic` и автоматически подхватывать файлы конфигурации.
 
-## Docker Compose (`docker-compose.yml`)
+---
 
-Для Traefik мы прокинем конфигурацию и порты. Если вы используете автоматические сертификаты, потребуется Volume для сохранения `acme.json`. Если ручные — папка с файлами сертификатов.
+## Вариант 1: Автоматические сертификаты (Let's Encrypt)
+
+### Docker Compose (`docker-compose.yml`)
+Мы настраиваем `certificatesresolvers` (в данном примере называется `myresolver`) и создаем volume для файла `acme.json`, чтобы не исчерпать лимиты Let's Encrypt при перезапусках.
 
 ```yaml
 version: "3.8"
@@ -21,23 +24,20 @@ services:
     image: traefik:v3.0
     command:
       - "--providers.docker=false"
-      - "--providers.file.filename=/etc/traefik/dynamic.yml"
+      - "--providers.file.directory=/etc/traefik/dynamic"
+      - "--providers.file.watch=true"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
-      # Настройка для автоматических сертификатов (Let's Encrypt):
-      # - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
-      # - "--certificatesresolvers.myresolver.acme.email=your-email@example.com"
-      # - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
+      - "--certificatesresolvers.myresolver.acme.email=your-email@example.com"
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - sockets_vol:/sockets
-      - ./dynamic.yml:/etc/traefik/dynamic.yml
-      # Для автоматических сертификатов раскомментируйте:
-      # - ./letsencrypt:/letsencrypt
-      # Для ручных сертификатов раскомментируйте:
-      # - ./certs:/certs
+      - ./traefik-dynamic:/etc/traefik/dynamic:ro
+      - ./letsencrypt:/letsencrypt
     depends_on:
       - worker
 
@@ -45,10 +45,8 @@ volumes:
   sockets_vol:
 ```
 
-## Динамическая конфигурация Traefik (`dynamic.yml`)
-
-### Вариант 1: Автоматические сертификаты (Let's Encrypt)
-Раскомментируйте настройки `certificatesresolvers` в `docker-compose.yml`, а в `dynamic.yml` укажите использование этого резолвера (`certResolver: myresolver`) для вашего роутера.
+### Динамическая конфигурация (`traefik-dynamic/worker.yml`)
+Здесь мы указываем, что роутер должен использовать `certResolver: myresolver`.
 
 ```yaml
 http:
@@ -68,8 +66,48 @@ http:
           - url: "http://unix:///sockets/worker.sock"
 ```
 
-### Вариант 2: Ручные сертификаты
-Сертификаты прописываются в блоке `tls.certificates`. Убедитесь, что пути в `certFile` и `keyFile` соответствуют папке, которую вы примонтировали в `docker-compose.yml` (`/certs`).
+---
+
+## Вариант 2: Ручные (свои) сертификаты
+
+### Docker Compose (`docker-compose.yml`)
+Здесь мы монтируем папку `./certs`, в которой лежат ваши файлы сертификатов (например, `cert.pem` и `key.pem`). Настройки `certificatesresolvers` не нужны.
+
+```yaml
+version: "3.8"
+
+services:
+  worker:
+    image: ghcr.io/sergeydigl3/tg-ws-proxy-relay:master
+    command: ["--listen-type", "unix", "--listen-addr", "/sockets/worker.sock"]
+    volumes:
+      - sockets_vol:/sockets
+    restart: unless-stopped
+
+  traefik:
+    image: traefik:v3.0
+    command:
+      - "--providers.docker=false"
+      - "--providers.file.directory=/etc/traefik/dynamic"
+      - "--providers.file.watch=true"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - sockets_vol:/sockets
+      - ./traefik-dynamic:/etc/traefik/dynamic:ro
+      - ./certs:/certs:ro
+    depends_on:
+      - worker
+
+volumes:
+  sockets_vol:
+```
+
+### Динамическая конфигурация (`traefik-dynamic/worker.yml`)
+Мы указываем пути к сертификатам в блоке `tls.certificates`, а у самого роутера просто включаем `tls: {}`.
 
 ```yaml
 http:
@@ -79,7 +117,6 @@ http:
       service: worker-service
       entryPoints:
         - websecure
-      # Включаем TLS без резолвера (будет использовать дефолтные загруженные сертификаты)
       tls: {}
 
   services:
@@ -94,6 +131,7 @@ tls:
       keyFile: "/certs/key.pem"
 ```
 
-### Решение возможных проблем с правами (Permissions)
-Если Traefik не может подключиться к сокету из-за прав доступа:
-Запустите оба контейнера (`worker` и `traefik`) от одного и того же пользователя с помощью директивы `user: "1000:1000"` в конфигурации каждого сервиса в файле `docker-compose.yml`.
+---
+
+## Решение возможных проблем с правами (Permissions)
+Запустите оба контейнера (`worker` и `traefik`) от одного и того же пользователя с помощью директивы `user: "1000:1000"` в `docker-compose.yml`, если Traefik выдает ошибки прав доступа при чтении сокета.
