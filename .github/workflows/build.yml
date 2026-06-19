@@ -14,7 +14,6 @@ env:
 jobs:
   build-binaries:
     name: Build Rust Binaries
-    runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
