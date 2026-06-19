@@ -1,5 +1,5 @@
 # Builder stage
-FROM rust:1.77-slim AS builder
+FROM rust:1-slim-bookworm AS builder
 
 WORKDIR /app
 # Устанавливаем зависимости для сборки (если потребуются для OpenSSL и прочего)
