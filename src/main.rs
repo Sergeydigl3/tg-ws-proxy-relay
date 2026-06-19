@@ -71,9 +71,9 @@ async fn main() {
                     let app = app.clone();
 
                     tokio::task::spawn(async move {
+                        let service = hyper_util::service::TowerToHyperService::new(app);
                         if let Err(err) = Builder::new(TokioExecutor::new())
-                            .serve_connection(io, app)
-                            .with_upgrades()
+                            .serve_connection_with_upgrades(io, service)
                             .await
                         {
                             eprintln!("Error serving connection: {}", err);
