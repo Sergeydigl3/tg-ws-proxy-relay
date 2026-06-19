@@ -1,6 +1,6 @@
-# Настройка Traefik с использованием Unix Socket (Docker)
+# Настройка Traefik (Docker)
 
-В данном руководстве показано, как запустить `worker` и `traefik` в Docker через Unix-сокет. Во всех примерах Traefik будет следить за директорией `traefik-dynamic` и автоматически подхватывать файлы конфигурации.
+В данном руководстве показано, как запустить `worker` и `traefik` в Docker. В отличие от Nginx/Caddy, Traefik **не поддерживает** роутинг на Unix-сокеты для бэкендов, поэтому мы используем внутреннюю сеть Docker (TCP). Во всех примерах Traefik будет следить за директорией `traefik-dynamic` и автоматически подхватывать файлы конфигурации.
 
 ---
 
@@ -15,9 +15,7 @@ version: "3.8"
 services:
   worker:
     image: ghcr.io/sergeydigl3/tg-ws-proxy-relay:master
-    command: ["--listen-type", "unix", "--listen-addr", "/sockets/worker.sock"]
-    volumes:
-      - sockets_vol:/sockets
+    command: ["--listen-type", "tcp", "--listen-addr", "0.0.0.0:8080"]
     restart: unless-stopped
 
   traefik:
@@ -35,14 +33,10 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - sockets_vol:/sockets
       - ./traefik-dynamic:/etc/traefik/dynamic:ro
       - ./letsencrypt:/letsencrypt
     depends_on:
       - worker
-
-volumes:
-  sockets_vol:
 ```
 
 ### Динамическая конфигурация (`traefik-dynamic/worker.yml`)
@@ -63,7 +57,7 @@ http:
     worker-service:
       loadBalancer:
         servers:
-          - url: "http://unix:///sockets/worker.sock"
+          - url: "http://worker:8080"
 ```
 
 ---
@@ -79,9 +73,7 @@ version: "3.8"
 services:
   worker:
     image: ghcr.io/sergeydigl3/tg-ws-proxy-relay:master
-    command: ["--listen-type", "unix", "--listen-addr", "/sockets/worker.sock"]
-    volumes:
-      - sockets_vol:/sockets
+    command: ["--listen-type", "tcp", "--listen-addr", "0.0.0.0:8080"]
     restart: unless-stopped
 
   traefik:
@@ -96,14 +88,10 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - sockets_vol:/sockets
       - ./traefik-dynamic:/etc/traefik/dynamic:ro
       - ./certs:/certs:ro
     depends_on:
       - worker
-
-volumes:
-  sockets_vol:
 ```
 
 ### Динамическая конфигурация (`traefik-dynamic/worker.yml`)
@@ -123,15 +111,10 @@ http:
     worker-service:
       loadBalancer:
         servers:
-          - url: "http://unix:///sockets/worker.sock"
+          - url: "http://worker:8080"
 
 tls:
   certificates:
     - certFile: "/certs/cert.pem"
       keyFile: "/certs/key.pem"
 ```
-
----
-
-## Решение возможных проблем с правами (Permissions)
-Запустите оба контейнера (`worker` и `traefik`) от одного и того же пользователя с помощью директивы `user: "1000:1000"` в `docker-compose.yml`, если Traefik выдает ошибки прав доступа при чтении сокета.

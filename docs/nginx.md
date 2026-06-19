@@ -1,6 +1,6 @@
-# Настройка NGINX с использованием Unix Socket (Docker)
+# Настройка NGINX (Docker)
 
-В данном руководстве показано, как запустить `worker` и `nginx` в Docker через Unix-сокет.
+В данном руководстве показано, как запустить `worker` и `nginx` в Docker. Мы используем внутреннюю сеть Docker (TCP) для связи контейнеров.
 
 ---
 
@@ -18,9 +18,7 @@ version: "3.8"
 services:
   worker:
     image: ghcr.io/sergeydigl3/tg-ws-proxy-relay:master
-    command: ["--listen-type", "unix", "--listen-addr", "/sockets/worker.sock"]
-    volumes:
-      - sockets_vol:/sockets
+    command: ["--listen-type", "tcp", "--listen-addr", "0.0.0.0:8080"]
     restart: unless-stopped
 
   nginx:
@@ -29,15 +27,11 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - sockets_vol:/sockets
       - ./nginx.conf:/etc/nginx/nginx.conf
       # Папка, сгенерированная Certbot-ом
       - ./letsencrypt:/etc/letsencrypt:ro
     depends_on:
       - worker
-
-volumes:
-  sockets_vol:
 ```
 
 ### Конфигурация (`nginx.conf`)
@@ -62,7 +56,7 @@ http {
         ssl_certificate_key /etc/letsencrypt/live/example.com/privkey.pem;
 
         location /apiws {
-            proxy_pass http://unix:/sockets/worker.sock;
+            proxy_pass http://worker:8080;
             
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
@@ -92,9 +86,7 @@ version: "3.8"
 services:
   worker:
     image: ghcr.io/sergeydigl3/tg-ws-proxy-relay:master
-    command: ["--listen-type", "unix", "--listen-addr", "/sockets/worker.sock"]
-    volumes:
-      - sockets_vol:/sockets
+    command: ["--listen-type", "tcp", "--listen-addr", "0.0.0.0:8080"]
     restart: unless-stopped
 
   nginx:
@@ -103,15 +95,11 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - sockets_vol:/sockets
       - ./nginx.conf:/etc/nginx/nginx.conf
       # Папка для ваших ручных сертификатов
       - ./certs:/etc/nginx/certs:ro
     depends_on:
       - worker
-
-volumes:
-  sockets_vol:
 ```
 
 ### Конфигурация (`nginx.conf`)
@@ -136,7 +124,7 @@ http {
         ssl_certificate_key /etc/nginx/certs/key.pem;
 
         location /apiws {
-            proxy_pass http://unix:/sockets/worker.sock;
+            proxy_pass http://worker:8080;
             
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
@@ -152,9 +140,3 @@ http {
     }
 }
 ```
-
----
-
-## Решение возможных проблем с правами (Permissions)
-Если NGINX выдает ошибку `13: Permission denied` при доступе к сокету:
-Запустите оба контейнера (`worker` и `nginx`) от одного и того же пользователя (добавив `user: "1000:1000"` в `docker-compose.yml`).

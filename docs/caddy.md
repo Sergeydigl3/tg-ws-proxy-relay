@@ -1,6 +1,6 @@
-# Настройка Caddy с использованием Unix Socket (Docker)
+# Настройка Caddy (Docker)
 
-В данном руководстве показано, как запустить `worker` и веб-сервер `caddy` в Docker через Unix-сокет.
+В данном руководстве показано, как запустить `worker` и веб-сервер `caddy` в Docker. Мы используем внутреннюю сеть Docker (TCP) для связи контейнеров.
 
 ---
 
@@ -9,7 +9,7 @@
 Этот вариант автоматически получает и продлевает SSL сертификат для вашего домена (убедитесь, что A-запись DNS настроена на сервер).
 
 ### Docker Compose (`docker-compose.yml`)
-Мы монтируем общую директорию `sockets_vol` для общения контейнеров и `caddy_data` для сохранения полученных сертификатов.
+Мы монтируем директорию `caddy_data` для сохранения полученных сертификатов.
 
 ```yaml
 version: "3.8"
@@ -17,9 +17,7 @@ version: "3.8"
 services:
   worker:
     image: ghcr.io/sergeydigl3/tg-ws-proxy-relay:master
-    command: ["--listen-type", "unix", "--listen-addr", "/sockets/worker.sock"]
-    volumes:
-      - sockets_vol:/sockets
+    command: ["--listen-type", "tcp", "--listen-addr", "0.0.0.0:8080"]
     restart: unless-stopped
 
   caddy:
@@ -28,14 +26,12 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - sockets_vol:/sockets
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
     depends_on:
       - worker
 
 volumes:
-  sockets_vol:
   caddy_data:
 ```
 
@@ -45,7 +41,7 @@ Caddy автоматически управляет заголовками WebSo
 ```caddyfile
 example.com {
     route /apiws* {
-        reverse_proxy unix//sockets/worker.sock
+        reverse_proxy http://worker:8080
     }
 }
 ```
@@ -65,9 +61,7 @@ version: "3.8"
 services:
   worker:
     image: ghcr.io/sergeydigl3/tg-ws-proxy-relay:master
-    command: ["--listen-type", "unix", "--listen-addr", "/sockets/worker.sock"]
-    volumes:
-      - sockets_vol:/sockets
+    command: ["--listen-type", "tcp", "--listen-addr", "0.0.0.0:8080"]
     restart: unless-stopped
 
   caddy:
@@ -76,14 +70,10 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - sockets_vol:/sockets
       - ./Caddyfile:/etc/caddy/Caddyfile
       - ./certs:/etc/caddy/certs:ro
     depends_on:
       - worker
-
-volumes:
-  sockets_vol:
 ```
 
 ### Конфигурация (`Caddyfile`)
@@ -94,12 +84,7 @@ example.com {
     tls /etc/caddy/certs/cert.pem /etc/caddy/certs/key.pem
     
     route /apiws* {
-        reverse_proxy unix//sockets/worker.sock
+        reverse_proxy http://worker:8080
     }
 }
 ```
-
----
-
-## Решение возможных проблем с правами (Permissions)
-Сокет создается от имени пользователя, запускающего `worker`. Если Caddy выдает ошибки прав доступа при попытке чтения сокета, запустите оба контейнера (`worker` и `caddy`) от одного и того же пользователя с помощью директивы `user: "1000:1000"` в каждом сервисе файла `docker-compose.yml`.
